@@ -5,3 +5,4 @@ description: Clustering of bacterial genomes
 long_description: |
    Fast and flexible bacterial genomic epidemiology with PopPUNK
    https://dx.doi.org/10.1101/gr.241455.118
+categories: [Sequence Analysis]
