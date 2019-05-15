@@ -1,0 +1,2 @@
+12673_8_24.contigs_velvet.fa
+12754_4_71.contigs_velvet.fa

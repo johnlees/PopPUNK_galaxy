@@ -1,0 +1,284 @@
+<tool id="poppunk_cluster" name="PopPUNK (cluster)" version="1.1.6">
+   <description>Cluster bacterial genomes</description>
+
+   <requirements>
+        <requirement type="package" version="1.1.6">poppunk</requirement>
+     </requirements>
+
+    <version_command><![CDATA[
+poppunk --version
+    ]]></version_command>
+
+    <command detect_errors="exit_code"><![CDATA[
+       ##Set up input files
+       ##echo "$input_assemblies" | tr ',' '\n' > r_files.txt
+       #for $input in $input_assemblies
+       ln -s $input $input.element_identifier && echo $input.element_identifier >> r_files.txt; 
+       #end for
+
+       ## command line 1 (create db)
+       echo "
+       poppunk 
+       --create-db 
+       --r-files r_files.txt 
+       --output poppunk_db 
+       --threads \${GALAXY_SLOTS:-1} 
+       --min-k $min_k 
+       --max-k $max_k 
+       --k-step $k_step 
+       --sketch-size $sketch_size 
+       --max-a-dist $max_a_dist 
+       #if $ignore_length
+       --ignore_length 
+       #end if
+       --no-stream 
+       " > poppunk_1.sh
+
+       && sh poppunk_1.sh
+
+       ## command line 2 (fit model)
+       && echo "
+       poppunk 
+       --fit-model 
+       --distances poppunk_db/poppunk_db.dists 
+       --ref-db poppunk_db 
+       --output poppunk_db 
+
+       ## mode
+       #if str( $model.model_mode ) == "gmm":
+       --K ${model.K} 
+       #end if
+       #if str( $model.model_mode ) == "dbscan":
+       --dbscan 
+       --D $model.D 
+       --min-cluster-prop $model.min_cluster_prop 
+       #end if
+
+       #if not $no_full_db or $refine.refine_model
+       --full-db 
+       #end if
+
+       #if not $refine.refine_model:
+         #if $external_clusters
+         --external-clustering $external_clusters
+         #end if
+
+         ## viz
+         #if $cytoscape:
+         --cytoscape 
+         #end if
+         #if $viz.microreact:
+         --microreact 
+         --rapidnj rapidnj 
+         --perplexity $viz.perplexity 
+         #end if
+         #if ($cytoscape or $viz.microreact) and $info_csv:
+         --info-csv $info_csv 
+         #end if
+       #end if
+
+       " > poppunk_2.sh
+
+       && sh poppunk_2.sh
+
+       ## command line 3 (refine)
+       #if $refine.refine_model:
+         && echo "
+         poppunk 
+         --refine-model 
+         --distances poppunk_db/poppunk_db.dists 
+         --ref-db poppunk_db 
+         --output poppunk_db 
+         --threads \${GALAXY_SLOTS:-1} 
+         --pos-shift $refine.pos_shift
+         --neg-shift $refine.neg_shift
+
+         #if not $no_full_db
+         --full-db 
+         #end if
+
+         #if $external_clusters
+         --external-clustering $external_clusters
+         #end if
+
+         ## viz
+         #if $cytoscape:
+         --cytoscape 
+         #end if
+         #if $viz.microreact:
+         --microreact 
+         --rapidnj rapidnj 
+         --perplexity $viz.perplexity 
+         #end if
+         #if ($cytoscape or $viz.microreact) and $info_csv:
+         --info-csv $info_csv 
+         #end if
+
+         " > poppunk_3.sh
+
+         && sh poppunk_3.sh;
+       #end if
+
+       ]]></command>
+
+    <inputs>
+
+       <!-- input files -->
+       <param name="input_assemblies" type="data" format="fasta" multiple="true" label="FASTA datasets (assemblies)">
+       </param>
+
+       <!-- model type -->
+       <conditional name="model">
+         <param name="model_mode" type="select" label="Choose a model to use" help="See documentation or description below for advice, if default does not work." display="radio">
+           <option value="gmm" selected="true">GMM</option>
+           <option value="dbscan">DBSCAN</option>
+         </param>
+         <!-- model options -->
+         <when value="gmm">
+           <param name="K" type="integer" value="3" min="2" max="10" label="Number of mixture components">
+           </param>
+         </when>
+         <when value="dbscan">
+           <param name="D" type="integer" value="100" min="2" max="500" label="Maximum number of spatial clusters">
+           </param>
+           <param name="min_cluster_prop" type="float" value="0.0001" min="0.00001" max="0.1" label="Minimum proportion of points in a cluster">
+           </param>
+         </when>
+       </conditional>
+
+       <!-- refine model options -->
+       <conditional name="refine">
+         <param name="refine_model" type="boolean" checked="false" label="Run model refinement after model fit">
+         </param>
+         <when value="true">
+           <param name="pos_shift" type="float" value="0.2" min="0.0" max="1.0" label="Maximum amount to move the boundary away from origin">
+           </param>
+           <param name="neg_shift" type="float" value="0.4" min="0.0" max="1.0" label="Minimum amount to move the boundary away from origin">
+           </param>
+         </when>
+         <when value='false' />
+       </conditional>
+
+       <!-- further analysis options -->
+       <conditional name="viz">
+         <param name="microreact" type="boolean" checked="true" label="Make visualisations for microreact (recommended)">
+         </param>
+         <when value="true">
+           <param name="perplexity" type="float" value="20.0" min="5.0" max="100.0" label="Perplexity parameter for accessory plot t-SNE">
+           </param>
+         </when>
+         <when value='false' />
+       </conditional>
+       <param name="cytoscape" type="boolean" checked="false" label="Make visualisations for cytoscape">
+       </param>
+
+       <!-- output options -->
+       <param name="no_full_db" type="boolean" checked="true" label="Select representative references">
+       </param>
+
+       <param name="external_clusters" type="data" format="csv" optional="true" label="External cluster labels to add (e.g. MLST/serotype)">
+       </param>
+       <param name="info_csv" type="data" format="csv" optional="true" label="Epidemiological information CSV formatted for microreact">
+       </param>
+
+       <!-- kmer comparison options -->
+       <param name="min_k" type="integer" value="13" min="7" max="31" label="Minimum k-mer length">
+       </param>
+       <param name="max_k" type="integer" value="29" min="7" max="31" label="Maximum k-mer length">
+       </param>
+       <param name="k_step" type="integer" value="3" min="2" max="5" label="Step size between k-mer lengths">
+       </param>
+       <param name="sketch_size" type="integer" value="10000" min="1000" max="2000000" label="Sketch size">
+       </param>
+
+       <!-- quality control options -->
+       <param name="max_a_dist" type="float" value="0.5" min="0.0" max="1.0" label="Maximum accessory distance to permit">
+       </param>
+       <param name="ignore_length" type="boolean" checked="false" label="Ignore assembly length outliers">
+       </param>
+
+    </inputs>
+
+    <outputs>
+       <data name="clusters" format="csv" from_work_dir="poppunk_db/poppunk_db_clusters.csv" label="${tool.name} on ${on_string} (cluster assignment)" />
+       <data name="distances" format="png" from_work_dir="poppunk_db/poppunk_db_distanceDistribution.png" label="${tool.name} on ${on_string} (distance plot)" />
+       <data name="references" format="txt" from_work_dir="poppunk_db/poppunk_db.refs" label="${tool.name} on ${on_string} (selected references)">
+         <filter>no_full_db == True</filter>
+       </data>
+       <data name="gmm_plot" format="png" from_work_dir="poppunk_db/poppunk_db_DPGMM_fit.png" label="${tool.name} on ${on_string} (GMM cluster plot)">
+         <filter>model['model_mode'] == 'gmm'</filter>
+       </data>
+       <data name="gmm_contours" format="pdf" from_work_dir="poppunk_db/poppunk_db_DPGMM_fit_contours.pdf" label="${tool.name} on ${on_string} (GMM contour plot)">
+         <filter>model['model_mode'] == 'gmm'</filter>
+       </data>
+       <data name="dbscan_plot" format="png" from_work_dir="poppunk_db/poppunk_db_dbscan.png" label="${tool.name} on ${on_string} (DBSCAN cluster plot)">
+         <filter>model['model_mode'] == 'dbscan'</filter>
+       </data>
+       <data name="refine_plot" format="png" from_work_dir="poppunk_db/poppunk_db_refined_fit.png" label="${tool.name} on ${on_string} (refine model plot)">
+         <filter>refine['refine_model'] == True</filter>
+       </data>
+       <data name="cytoscape_network" format="data" from_work_dir="poppunk_db/poppunk_db_cytoscape.graphml" label="${tool.name} on ${on_string} (cytoscape network)">
+         <filter>cytoscape == True</filter>
+      </data>
+      <data name="cytoscape_clusters" format="csv" from_work_dir="poppunk_db/poppunk_db_cytoscape.csv" label="${tool.name} on ${on_string} (cytoscape csv)">
+         <filter>cytoscape == True</filter>
+      </data>
+      <data name="microreact_clusters" format="csv" from_work_dir="poppunk_db/poppunk_db_microreact_clusters.csv" label="${tool.name} on ${on_string} (microreact csv)">
+         <filter>viz['microreact'] == True</filter>
+      </data>
+      <data name="microreact_tree" format="newick" from_work_dir="poppunk_db/poppunk_db_core_NJ.nwk" label="${tool.name} on ${on_string} (microreact tree)">
+         <filter>viz['microreact'] == True</filter>
+      </data>
+      <data name="microreact_dot" format="graph_dot" from_work_dir="poppunk_db/poppunk_db_perplexity${perplexity}_accessory_tsne.dot" label="${tool.name} on ${on_string} (microreact dot)">
+         <filter>viz['microreact'] == True</filter>
+      </data>
+    </outputs>
+
+    <tests>
+       <test>
+          <param name='input_assemblies' value='12673_8_24.contigs_velvet.fa,12673_8_34.contigs_velvet.fa,12673_8_43.contigs_velvet.fa,12754_4_71.contigs_velvet.fa,12754_4_77.contigs_velvet.fa' />
+          <param name='model_mode' value='gmm' />
+          <param name='K' value='4' />
+          <param name='microreact' value='false' />
+          <param name='no_full_db' value='false' />
+          <output name="clusters" ftype='csv' file="clusters.csv" />
+          <output name="distances" ftype='png' file="distances.png" />
+          <output name="references" file="refs.txt" />
+          <output name="gmm_plot" ftype='png' file="gmm_fit.png" />
+          <output name="gmm_contours" ftype='pdf' file="gmm_contours.pdf" />
+       </test>
+    </tests>
+
+    <help><![CDATA[
+**What it does**
+
+PopPUNK will calculate core and accessory distance between input assemblies using variable length k-mers. A model will be fitted to all of these distances to determine genetic clusters for all inpits.
+
+------
+
+**Description**
+
+       The most important thing to check is that in the output plot the component (blob) closest to the origin has been correctly identified - this should be checked in the cluster/model plot output. If it has not, you may wish to try another model. Some broad advice:
+
+  * DBSCAN is a good default, but may lead to unclassified points (black). If there are a large number of these consider another model.
+  * GMM will work well with well-separated components and an appropriate choice of K (consider increasing it based on the number of components that can be seen).
+  * The refine mode should be added in recombining species, which can be seen from the output plots if the coloured components are overlapping, or if there is a blur of points rather than discrete blobs of points..
+       ]]></help>
+
+    <citations>
+       <citation type='bibtex'>
+@article{Lees01022019,
+  author = {Lees, John A. and Harris, Simon R. and Tonkin-Hill, Gerry and Gladstone, Rebecca A. and Lo, Stephanie W. and Weiser, Jeffrey N. and Corander, Jukka and Bentley, Stephen D. and Croucher, Nicholas J.},
+  title = {Fast and flexible bacterial genomic epidemiology with PopPUNK},
+  volume = {29},
+  number = {2},
+  pages = {304-316},
+  year = {2019},
+  doi = {10.1101/gr.241455.118},
+  abstract ={The routine use of genomics for disease surveillance provides the opportunity for high-resolution bacterial epidemiology. Current whole-genome clustering and multilocus typing approaches do not fully exploit core and accessory genomic variation, and they cannot both automatically identify, and subsequently expand, clusters of significantly similar isolates in large data sets spanning entire species. Here, we describe PopPUNK (Population Partitioning Using Nucleotide K-mers), a software implementing scalable and expandable annotation- and alignment-free methods for population analysis and clustering. Variable-length k-mer comparisons are used to distinguish isolates’ divergence in shared sequence and gene content, which we demonstrate to be accurate over multiple orders of magnitude using data from both simulations and genomic collections representing 10 taxonomically widespread species. Connections between closely related isolates of the same strain are robustly identified, despite interspecies variation in the pairwise distance distributions that reflects species’ diverse evolutionary patterns. PopPUNK can process 103–104 genomes in a single batch, with minimal memory use and runtimes up to 200-fold faster than existing model-based methods. Clusters of strains remain consistent as new batches of genomes are added, which is achieved without needing to reanalyze all genomes de novo. This facilitates real-time surveillance with consistent cluster naming between studies and allows for outbreak detection using hundreds of genomes in minutes. Interactive visualization and online publication is streamlined through the automatic output of results to multiple platforms. PopPUNK has been designed as a flexible platform that addresses important issues with currently used whole-genome clustering and typing methods, and has potential uses across bacterial genetics and public health research.},
+  URL = {http://genome.cshlp.org/content/29/2/304.abstract},
+  eprint = {http://genome.cshlp.org/content/29/2/304.full.pdf+html},
+  journal = {Genome Research}
+          }</citation>
+    </citations>
+</tool>
