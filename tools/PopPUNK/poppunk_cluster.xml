@@ -28,8 +28,8 @@ poppunk --version
        --k-step $k_step 
        --sketch-size $sketch_size 
        --max-a-dist $max_a_dist 
-       #if $ignore_length
-       --ignore_length 
+       #if $ignore_length 
+       --ignore-length 
        #end if
        --no-stream 
        " > poppunk_1.sh
